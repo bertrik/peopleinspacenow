@@ -6,8 +6,32 @@
 #define PEOPLE_TIMEOUT_MS   5000
 #define DATA_PIN_LED 27
 
+#define ISS_ID 25544
+
+static const char *root_ca = "-----BEGIN CERTIFICATE-----\n" \
+"MIIDSjCCAjKgAwIBAgIQRK+wgNajJ7qJMDmGLvhAazANBgkqhkiG9w0BAQUFADA/\n" \
+"MSQwIgYDVQQKExtEaWdpdGFsIFNpZ25hdHVyZSBUcnVzdCBDby4xFzAVBgNVBAMT\n" \
+"DkRTVCBSb290IENBIFgzMB4XDTAwMDkzMDIxMTIxOVoXDTIxMDkzMDE0MDExNVow\n" \
+"PzEkMCIGA1UEChMbRGlnaXRhbCBTaWduYXR1cmUgVHJ1c3QgQ28uMRcwFQYDVQQD\n" \
+"Ew5EU1QgUm9vdCBDQSBYMzCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEB\n" \
+"AN+v6ZdQCINXtMxiZfaQguzH0yxrMMpb7NnDfcdAwRgUi+DoM3ZJKuM/IUmTrE4O\n" \
+"rz5Iy2Xu/NMhD2XSKtkyj4zl93ewEnu1lcCJo6m67XMuegwGMoOifooUMM0RoOEq\n" \
+"OLl5CjH9UL2AZd+3UWODyOKIYepLYYHsUmu5ouJLGiifSKOeDNoJjj4XLh7dIN9b\n" \
+"xiqKqy69cK3FCxolkHRyxXtqqzTWMIn/5WgTe1QLyNau7Fqckh49ZLOMxt+/yUFw\n" \
+"7BZy1SbsOFU5Q9D8/RhcQPGX69Wam40dutolucbY38EVAjqr2m7xPi71XAicPNaD\n" \
+"aeQQmxkqtilX4+U9m5/wAl0CAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAOBgNV\n" \
+"HQ8BAf8EBAMCAQYwHQYDVR0OBBYEFMSnsaR7LHH62+FLkHX/xBVghYkQMA0GCSqG\n" \
+"SIb3DQEBBQUAA4IBAQCjGiybFwBcqR7uKGY3Or+Dxz9LwwmglSBd49lZRNI+DT69\n" \
+"ikugdB/OEIKcdBodfpga3csTS7MgROSR6cz8faXbauX+5v3gTt23ADq1cEmv8uXr\n" \
+"AvHRAosZy5Q6XkjEGB5YGV8eAlrwDPGxrancWYaLbumR9YbK+rlmM6pZW87ipxZz\n" \
+"R8srzJmwN0jP41ZL9c8PDHIyh8bwRLtTcm1D9SZImlJnt1ir/md2cXjbDaJWFBM5\n" \
+"JDGFoqgCWjBH4d1QB7wCCZAA62RjYJsWvIjJEubSfZGL+T0yjWW06XyxV3bqxbYo\n" \
+"Ob8VZRzI9neWagqNdwvYkQsEjgfbKbYK7p2CNTUQ\n" \
+"-----END CERTIFICATE-----\n";
+
 static CRGB leds[25];
 static WiFiClient wifiClient;
+static WiFiClientSecure wifiClientSecure;
 
 static bool fetch_people(String url, String & response)
 {
@@ -43,7 +67,7 @@ static bool parse_people(String json, int &number)
     JsonObject root = doc.as < JsonObject > ();
     number = root["number"];
     JsonArray people = root["people"];
-  for (JsonObject person:people) {
+    for (JsonObject person:people) {
         String name = person["name"];
         String craft = person["craft"];
         Serial.printf("%s in %s\n", name.c_str(), craft.c_str());
@@ -51,6 +75,97 @@ static bool parse_people(String json, int &number)
     return true;
 }
 
+static bool fetch_sat(int id, String &response)
+{
+    HTTPClient httpClient;
+
+    String url = "https://api.wheretheiss.at/v1/satellites/";
+    url += id;
+
+    httpClient.begin(wifiClientSecure, url);
+    httpClient.setTimeout(PEOPLE_TIMEOUT_MS);
+    printf("> GET %s\n", url.c_str());
+    int res = httpClient.GET();
+
+    // evaluate result
+    bool result = (res == HTTP_CODE_OK);
+    response = result ? httpClient.getString() : httpClient.errorToString(res);
+    httpClient.end();
+    printf("< %d: %s\n", res, response.c_str());
+
+    return result;
+}
+
+static bool parse_sat(String json, String &name, float &lat, float &lon, float &alt)
+{
+    DynamicJsonDocument doc(4096);
+    if (deserializeJson(doc, json) != DeserializationError::Ok) {
+        return false;
+    }
+
+    JsonObject root = doc.as < JsonObject > ();
+    name = root["name"].as<String>();
+    lat = root["latitude"];
+    lon = root["longitude"];
+    alt = root["altitude"];
+
+    return true;
+}
+
+static void draw_pixel(int x, int y, CRGB c)
+{
+    y = 4 - y;
+    if ((x >= 0) && (x < 5) && (y >= 0) && (y < 5)) {
+        leds[y * 5 + x] = c;
+    }
+}
+
+static void draw_sat(float lat, float lon)
+{
+    // origin is middle, x goes right, y goes up
+    int x = 2 + round(sin(lon * M_PI / 180) * 2.0);
+    int y = 2 + round(sin(lat * M_PI / 180) * 2.0);
+
+    printf("x=%d, y=%d\n", x, y);
+    CRGB c = ((lon > -90) && (lon < 90)) ? CRGB::Gray : CRGB::LightBlue;
+    draw_pixel(x, y, c);
+}
+
+static void draw_earth(void)
+{
+    memset(leds, 0, sizeof(leds));
+
+    int y = 0;
+    draw_pixel(1, y, CRGB::DarkBlue);
+    draw_pixel(2, y, CRGB::DarkBlue);
+    draw_pixel(3, y, CRGB::DarkBlue);
+
+    y++;
+    draw_pixel(0, y, CRGB::DarkBlue);
+    draw_pixel(1, y, CRGB::Blue);
+    draw_pixel(2, y, CRGB::Blue);
+    draw_pixel(3, y, CRGB::Blue);
+    draw_pixel(4, y, CRGB::DarkBlue);
+
+    y++;
+    draw_pixel(0, y, CRGB::DarkBlue);
+    draw_pixel(1, y, CRGB::Blue);
+    draw_pixel(2, y, CRGB::Blue);
+    draw_pixel(3, y, CRGB::Blue);
+    draw_pixel(4, y, CRGB::DarkBlue);
+
+    y++;
+    draw_pixel(0, y, CRGB::DarkBlue);
+    draw_pixel(1, y, CRGB::Blue);
+    draw_pixel(2, y, CRGB::Blue);
+    draw_pixel(3, y, CRGB::Blue);
+    draw_pixel(4, y, CRGB::DarkBlue);
+
+    y++;
+    draw_pixel(1, y, CRGB::DarkBlue);
+    draw_pixel(2, y, CRGB::DarkBlue);
+    draw_pixel(3, y, CRGB::DarkBlue);
+}
 
 void setup(void)
 {
@@ -65,16 +180,20 @@ void setup(void)
         Serial.print(".");
         delay(500);
     }
+    wifiClientSecure.setCACert(root_ca);
 }
 
 void loop(void)
 {
     static int period_prev = -1;
-    int period = millis() / 600000;
+    int period = millis() / 60000;
     if (period != period_prev) {
         period_prev = period;
 
         String response;
+
+#if 0
+        // get people in space
         if (fetch_people("http://api.open-notify.org/astros.json", response)) {
             int number;
             if (parse_people(response, number)) {
@@ -83,7 +202,23 @@ void loop(void)
                 Serial.printf("Error decoding JSON!\n");
             }
         } else {
-            Serial.printf("Error performing HTTP GET!\n");
+            Serial.printf("Error performing people-in-space HTTP GET!\n");
+        }
+#endif
+
+        // get ISS position
+        if (fetch_sat(ISS_ID, response)) {
+            String name;
+            float lat, lon, alt;
+            if (parse_sat(response, name, lat, lon, alt)) {
+                printf("%s is at %f, %f, %f\n", name.c_str(), lat, lon, alt);
+                draw_earth();
+                draw_sat(lat, lon);
+            } else {
+                Serial.printf("Error decoding JSON!\n");
+            }
+        } else {
+            Serial.printf("Error performing satellite HTTP GET!\n");
         }
     }
 
