@@ -4,7 +4,8 @@
 #include <ArduinoJson.h>
 
 #define PEOPLE_TIMEOUT_MS   5000
-#define DATA_PIN_LED 27
+#define DATA_PIN_LED    27
+#define PIN_BUTTON      39
 
 #define ISS_ID 25544
 
@@ -127,7 +128,7 @@ static void draw_sat(float lat, float lon)
     int y = 2 + round(sin(lat * M_PI / 180) * 2.0);
 
     printf("x=%d, y=%d\n", x, y);
-    CRGB c = ((lon > -90) && (lon < 90)) ? CRGB::Gray : CRGB::LightBlue;
+    CRGB c = ((lon > -90) && (lon < 90)) ? CRGB::Gray : CRGB::DarkGrey;
     draw_pixel(x, y, c);
 }
 
@@ -169,6 +170,8 @@ static void draw_earth(void)
 
 void setup(void)
 {
+    pinMode(PIN_BUTTON, INPUT_PULLUP);
+
     FastLED.addLeds < WS2812B, DATA_PIN_LED, GRB > (leds, 25);
     FastLED.setBrightness(20);
 
@@ -185,28 +188,14 @@ void setup(void)
 
 void loop(void)
 {
+    // update satellite position every minute
     static int period_prev = -1;
     int period = millis() / 60000;
     if (period != period_prev) {
         period_prev = period;
 
-        String response;
-
-#if 0
-        // get people in space
-        if (fetch_people("http://api.open-notify.org/astros.json", response)) {
-            int number;
-            if (parse_people(response, number)) {
-                Serial.printf("%d people in space!\n", number);
-            } else {
-                Serial.printf("Error decoding JSON!\n");
-            }
-        } else {
-            Serial.printf("Error performing people-in-space HTTP GET!\n");
-        }
-#endif
-
         // get ISS position
+        String response;
         if (fetch_sat(ISS_ID, response)) {
             String name;
             float lat, lon, alt;
@@ -219,6 +208,22 @@ void loop(void)
             }
         } else {
             Serial.printf("Error performing satellite HTTP GET!\n");
+        }
+    }
+
+    // get number of people in space if button is pressed
+    if (digitalRead(PIN_BUTTON) == LOW) {
+        // get people in space
+        String response;
+        if (fetch_people("http://api.open-notify.org/astros.json", response)) {
+            int number;
+            if (parse_people(response, number)) {
+                Serial.printf("%d people in space!\n", number);
+            } else {
+                Serial.printf("Error decoding JSON!\n");
+            }
+        } else {
+            Serial.printf("Error performing people-in-space HTTP GET!\n");
         }
     }
 
