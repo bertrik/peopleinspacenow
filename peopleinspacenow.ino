@@ -58,7 +58,7 @@ static bool fetch_people(String & response)
     // retry GET a few times until we get a valid HTTP code
     int res = 0;
     for (int i = 0; i < 3; i++) {
-        printf("> GET %s\n", url.c_str());
+        Serial.printf("> GET %s\n", url.c_str());
         res = httpClient.GET();
         if (res > 0) {
             break;
@@ -69,7 +69,7 @@ static bool fetch_people(String & response)
     bool result = (res == HTTP_CODE_OK);
     response = result ? httpClient.getString() : httpClient.errorToString(res);
     httpClient.end();
-    printf("< %d: %s\n", res, response.c_str());
+    Serial.printf("< %d: %s\n", res, response.c_str());
     return result;
 }
 
@@ -125,14 +125,14 @@ static bool fetch_sat(int id, String &response)
 
     httpClient.begin(wifiClientSecure, url);
     httpClient.setTimeout(HTTP_TIMEOUT_MS);
-    printf("> GET %s\n", url.c_str());
+    Serial.printf("> GET %s\n", url.c_str());
     int res = httpClient.GET();
 
     // evaluate result
     bool result = (res == HTTP_CODE_OK);
     response = result ? httpClient.getString() : httpClient.errorToString(res);
     httpClient.end();
-    printf("< %d: %s\n", res, response.c_str());
+    Serial.printf("< %d: %s\n", res, response.c_str());
 
     return result;
 }
@@ -159,7 +159,7 @@ static void draw_sat(float lat, float lon)
     int x = 2 + round(sin(lon * M_PI / 180) * 2.0);
     int y = 2 + round(sin(lat * M_PI / 180) * 2.0);
 
-    printf("x=%d, y=%d\n", x, y);
+    Serial.printf("x=%d, y=%d\n", x, y);
     CRGB c = ((lon > -90) && (lon < 90)) ? CRGB::Gray : CRGB::DarkGrey;
     draw_pixel(x, 4 - y, c);
 }
@@ -232,7 +232,7 @@ void loop(void)
             String name;
             float lat, lon, alt;
             if (parse_sat(response, name, lat, lon, alt)) {
-                printf("%s is at %f, %f, %f\n", name.c_str(), lat, lon, alt);
+                Serial.printf("%s is at %f, %f, %f\n", name.c_str(), lat, lon, alt);
                 draw_earth();
                 draw_sat(lat, lon);
             } else {
