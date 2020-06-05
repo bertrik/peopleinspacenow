@@ -3,11 +3,24 @@
 #include <FastLED.h>
 #include <ArduinoJson.h>
 
-#define PEOPLE_TIMEOUT_MS   5000
-#define DATA_PIN_LED    27
-#define PIN_BUTTON      39
+#define HTTP_TIMEOUT_MS   5000
+#define PIN_LED     27
+#define PIN_BUTTON  39
 
 #define ISS_ID 25544
+
+static const char digits[10][5] {
+    {0b1110, 0b1010, 0b1010, 0b1010, 0b1110}, // 0
+    {0b0100, 0b1100, 0b0100, 0b0100, 0b1110}, // 1
+    {0b1110, 0b0010, 0b1110, 0b1000, 0b1110}, // 2
+    {0b1110, 0b0010, 0b0110, 0b0010, 0b1110}, // 3
+    {0b1000, 0b1010, 0b1110, 0b0010, 0b0010}, // 4
+    {0b1110, 0b1000, 0b1110, 0b0010, 0b1110}, // 5
+    {0b0110, 0b1000, 0b1110, 0b1010, 0b1110}, // 6
+    {0b1110, 0b0010, 0b0100, 0b0100, 0b0100}, // 7
+    {0b1110, 0b1010, 0b1110, 0b1010, 0b1110}, // 8
+    {0b1110, 0b1010, 0b1110, 0b0010, 0b1100}, // 9
+};
 
 static const char *root_ca = "-----BEGIN CERTIFICATE-----\n" \
 "MIIDSjCCAjKgAwIBAgIQRK+wgNajJ7qJMDmGLvhAazANBgkqhkiG9w0BAQUFADA/\n" \
@@ -34,11 +47,13 @@ static CRGB leds[25];
 static WiFiClient wifiClient;
 static WiFiClientSecure wifiClientSecure;
 
-static bool fetch_people(String url, String & response)
+static bool fetch_people(String & response)
 {
+    String url = "http://api.open-notify.org/astros.json";
+
     HTTPClient httpClient;
     httpClient.begin(wifiClient, url);
-    httpClient.setTimeout(PEOPLE_TIMEOUT_MS);
+    httpClient.setTimeout(HTTP_TIMEOUT_MS);
 
     // retry GET a few times until we get a valid HTTP code
     int res = 0;
@@ -76,6 +91,31 @@ static bool parse_people(String json, int &number)
     return true;
 }
 
+// origin is top-left
+static void draw_pixel(int x, int y, CRGB c)
+{
+    if ((x >= 0) && (x < 5) && (y >= 0) && (y < 5)) {
+        leds[y * 5 + x] = c;
+    }
+}
+
+static void draw_number(int number)
+{
+    if (number > 9) {
+        number = 9;
+    }
+    const char *p = digits[number];
+    for (int y = 0; y < 5; y++) {
+        int d = *p;
+        for (int x = 0; x < 5; x++) {
+            if ((d & (0b10000 >> x)) != 0) {
+                draw_pixel(x, y, CRGB::White);
+            }
+        }
+        p++;
+    }
+}
+
 static bool fetch_sat(int id, String &response)
 {
     HTTPClient httpClient;
@@ -84,7 +124,7 @@ static bool fetch_sat(int id, String &response)
     url += id;
 
     httpClient.begin(wifiClientSecure, url);
-    httpClient.setTimeout(PEOPLE_TIMEOUT_MS);
+    httpClient.setTimeout(HTTP_TIMEOUT_MS);
     printf("> GET %s\n", url.c_str());
     int res = httpClient.GET();
 
@@ -113,14 +153,6 @@ static bool parse_sat(String json, String &name, float &lat, float &lon, float &
     return true;
 }
 
-static void draw_pixel(int x, int y, CRGB c)
-{
-    y = 4 - y;
-    if ((x >= 0) && (x < 5) && (y >= 0) && (y < 5)) {
-        leds[y * 5 + x] = c;
-    }
-}
-
 static void draw_sat(float lat, float lon)
 {
     // origin is middle, x goes right, y goes up
@@ -129,7 +161,7 @@ static void draw_sat(float lat, float lon)
 
     printf("x=%d, y=%d\n", x, y);
     CRGB c = ((lon > -90) && (lon < 90)) ? CRGB::Gray : CRGB::DarkGrey;
-    draw_pixel(x, y, c);
+    draw_pixel(x, 4 - y, c);
 }
 
 static void draw_earth(void)
@@ -172,7 +204,7 @@ void setup(void)
 {
     pinMode(PIN_BUTTON, INPUT_PULLUP);
 
-    FastLED.addLeds < WS2812B, DATA_PIN_LED, GRB > (leds, 25);
+    FastLED.addLeds < WS2812B, PIN_LED, GRB > (leds, 25);
     FastLED.setBrightness(20);
 
     Serial.begin(115200);
@@ -213,12 +245,15 @@ void loop(void)
 
     // get number of people in space if button is pressed
     if (digitalRead(PIN_BUTTON) == LOW) {
+        FastLED.clear();
+
         // get people in space
         String response;
-        if (fetch_people("http://api.open-notify.org/astros.json", response)) {
+        if (fetch_people(response)) {
             int number;
             if (parse_people(response, number)) {
                 Serial.printf("%d people in space!\n", number);
+                draw_number(number);
             } else {
                 Serial.printf("Error decoding JSON!\n");
             }
