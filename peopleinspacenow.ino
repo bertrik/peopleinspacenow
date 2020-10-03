@@ -2,6 +2,8 @@
 #include <HTTPClient.h>
 #include <FastLED.h>
 #include <ArduinoJson.h>
+#include <SPIFFS.h>
+#include <WiFiSettings.h>
 
 #define HTTP_TIMEOUT_MS   5000
 #define PIN_LED     27
@@ -210,11 +212,10 @@ void setup(void)
     Serial.begin(115200);
     Serial.println("\nHow many people are in space now?");
 
-    WiFi.begin("revspace-pub-2.4ghz");
-    while (WiFi.status() != WL_CONNECTED) {
-        Serial.print(".");
-        delay(500);
-    }
+    // connect (or start captive portal to choose a connection)
+    SPIFFS.begin(true);
+    WiFiSettings.connect();
+
     wifiClientSecure.setCACert(root_ca);
 }
 
